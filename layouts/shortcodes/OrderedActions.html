@@ -74,9 +74,7 @@
 <body>
     <script>
         // Utility function to execute a SPARQL query
-        async function executeSparqlQuery(query) {
-            // Define the SPARQL endpoint URL
-            const endpointUrl = 'https://knowledgedb.informatik.uni-bremen.de/productKG/productKG/query';
+        async function executeSparqlQuery(query, endpointUrl, binding = false) {
             // Define the request options
             const requestOptions = {
                 method: 'POST',
@@ -93,6 +91,20 @@
                 // Check if the response is OK
                 if (!response.ok) {
                     throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                if(binding){
+                    // Parse the response as JSON
+                    const data = await response.json();
+                    // Extract and return relevant results
+                    return data.results.bindings.map(binding => {
+                        const result = {};
+                        for (const key in binding) {
+                            if (binding[key].value) {
+                                result[key] = binding[key].value;
+                            }
+                        }
+                        return result;
+                    });
                 }
 
                 // Parse and return the response as JSON
@@ -127,8 +139,11 @@
 
             // Fetch the list of recipes
             try {
+                
+                // Define the SPARQL endpoint URL
+                const endpointUrl = 'https://knowledgedb.informatik.uni-bremen.de/productKG/productKG/query';
                 // Execute the SPARQL query
-                const data = await executeSparqlQuery(sparqlQuery);
+                const data = await executeSparqlQuery(sparqlQuery, endpointUrl);
 
                 // Check for expected structure
                 if (data.results && data.results.bindings) {
@@ -210,12 +225,40 @@
                         <${recipeUri}> ?property ?value.
                     }
                 `;
+
+            const superclassSparqlQuery = `
+                PREFIX owl: <http://www.w3.org/2002/07/owl#>
+                PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+                SELECT ?superclass ?property ?value
+                WHERE {
+                    {   
+                        <${recipeUri}> rdfs:subClassOf+ ?superclass .
+                        ?superclass owl:onProperty <http://www.ease-crc.org/ont/SOMA.owl#includes_task> .
+                        ?superclass owl:someValuesFrom ?value .
+                        BIND(<http://www.ease-crc.org/ont/SOMA.owl#includes_task> AS ?property)
+                    }
+                    UNION
+                    {
+                        <${recipeUri}> rdfs:subClassOf+ ?superclass .
+                        ?superclass owl:intersectionOf ?collection .
+                        ?collection rdf:rest*/rdf:first ?restriction .
+                        ?restriction owl:onProperty ?property .
+                        ?restriction owl:someValuesFrom ?value .
+                    }
+                }
+            `;
             // Fetch the recipe details
             try {
+
+                
+            // Define the SPARQL endpoint URL
+            const endpointUrl = 'https://knowledgedb.informatik.uni-bremen.de/productKG/productKG/query';
                 // Execute the SPARQL query and fetch superclass details in parallel
                 const [data, superclassDetails] = await Promise.all([
-                    executeSparqlQuery(sparqlQuery),
-                    fetchRecipeSuperclassDetails(recipeUri)
+                    executeSparqlQuery(sparqlQuery, endpointUrl),
+                    executeSparqlQuery(superclassSparqlQuery, endpointUrl),
                 ]);
                 // Process and display the fetched data
                 if (data.results && data.results.bindings) {
@@ -247,64 +290,26 @@
                     // Log an error if no details are found
                     console.error('No details found for the selected recipe.');
                 }
-            } catch (error) {
-                // Log and display any errors that occur during the fetch
-                console.error('Error fetching recipe details:', error);
-            }
-        }
 
-
-        // Function to fetch recipe superclass details and return them as a structured array
-        async function fetchRecipeSuperclassDetails(recipeUri) {
-            // SPARQL query to fetch superclass details
-            const sparqlQuery = `
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-
-        SELECT ?superclass ?property ?value
-        WHERE {
-            {   
-                <${recipeUri}> rdfs:subClassOf+ ?superclass .
-                ?superclass owl:onProperty <http://www.ease-crc.org/ont/SOMA.owl#includes_task> .
-                ?superclass owl:someValuesFrom ?value .
-                BIND(<http://www.ease-crc.org/ont/SOMA.owl#includes_task> AS ?property)
-            }
-            UNION
-            {
-                <${recipeUri}> rdfs:subClassOf+ ?superclass .
-                ?superclass owl:intersectionOf ?collection .
-                ?collection rdf:rest*/rdf:first ?restriction .
-                ?restriction owl:onProperty ?property .
-                ?restriction owl:someValuesFrom ?value .
-            }
-        }
-    `;
-            // Execute the SPARQL query and process the results
-            try {
-                const data = await executeSparqlQuery(sparqlQuery);
-
-                if (data.results && data.results.bindings) {
+                if (superclassDetails.results && superclassDetails.results.bindings) {
                     // Extract the relevant details from the query results
-                    const details = data.results.bindings.map(binding => ({
+                    const details = superclassDetails.results.bindings.map(binding => ({
                         superclass: binding.superclass.value,
                         property: binding.property.value,
                         value: binding.value.value
                     }));
 
                     // Pass both details and the query to update the tooltip
-                    displayRecipeSuperclassDetails(details, sparqlQuery);
-                    // Return the extracted details
-                    return details;
+                    displayRecipeSuperclassDetails(details, superclassSparqlQuery);
                 } else {
                     // Log if no details are found
                     console.log('No superclass details found for the selected recipe.');
                     return [];
                 }
+
             } catch (error) {
-                // Log and return an empty array in case of any errors
-                console.error('Error fetching superclass details:', error);
-                return [];
+                // Log and display any errors that occur during the fetch
+                console.error('Error fetching recipe details:', error);
             }
         }
 
@@ -458,8 +463,11 @@
                 }
             `;
             try {
+                // Define the SPARQL endpoint URL
+                const endpointUrl = ' https://knowledgedb.informatik.uni-bremen.de/mealprepDB/MealPreparation/query';
                 // Execute the query using the query_text_meals_owl function
-                const results = await query_text_meals_owl(sparqlQuery);
+                const results = await executeSparqlQuery(sparqlQuery, endpointUrl, true);
+
                 results[0].rep = results[0].rep.split('=')[1];
                 results[0].position = results[0].position.split('#')[1];
                 return results;
@@ -484,8 +492,11 @@
                 } 
             `;
             try {
+                // Define the SPARQL endpoint URL
+                const endpointUrl = ' https://knowledgedb.informatik.uni-bremen.de/mealprepDB/MealPreparation/query';
                 // Execute the query using the query_text_meals_owl function
-                const results = await query_text_meals_owl(sparqlQuery);
+                const results = await executeSparqlQuery(sparqlQuery, endpointUrl, true);
+
                 if (results[0]) {
                     results[0].tool = results[0].tool.split('#')[1];
                 }
@@ -519,8 +530,11 @@
             `;
 
             try {
+                // Define the SPARQL endpoint URL
+                const endpointUrl = ' https://knowledgedb.informatik.uni-bremen.de/mealprepDB/MealPreparation/query';
                 // Execute the query using the query_text_meals_owl function
-                const results = await query_text_meals_owl(sparqlQuery);
+                const results = await executeSparqlQuery(sparqlQuery, endpointUrl, true);
+
                 if (results && results.length > 0) {
                     if (results[0].iri != null) {
                         return [results[0].iri, results[0].superClass, results[0].supersuperClass];
@@ -535,51 +549,6 @@
                 return `Error fetching URL for "${item}"`;
             }
         }
-
-
-        // Function to query the meals ontology for text-based meals
-        async function query_text_meals_owl(query) {
-            // Define the SPARQL endpoint URL
-            const endpointUrl = ' https://knowledgedb.informatik.uni-bremen.de/mealprepDB/MealPreparation/query';
-
-            // 2) Define the request options
-            const requestOptions = {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/sparql-query',
-                },
-                body: query,
-            };
-
-            // Execute the query and return the response
-            try {
-                const response = await fetch(endpointUrl, requestOptions);
-
-                // Check if the response is OK
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-
-                // Parse the response as JSON
-                const data = await response.json();
-
-                // Extract and return relevant results
-                return data.results.bindings.map(binding => {
-                    const result = {};
-                    for (const key in binding) {
-                        if (binding[key].value) {
-                            result[key] = binding[key].value;
-                        }
-                    }
-                    return result;
-                });
-
-            } catch (error) {
-                console.error('Error executing SPARQL query:', error);
-                throw error;
-            }
-        }
-
 
 
         // Initialize tooltips when the page is loaded
